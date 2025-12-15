@@ -107,7 +107,7 @@ export default function Register() {
       
       const data = await response.json();
       if (response.ok) {
-          router.push("/account"); 
+          router.push("/login"); 
       } else {
         toast({
           title: "Registration Failed",
