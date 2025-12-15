@@ -5,9 +5,18 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { Zap, Check } from "lucide-react";
+import * as z from "zod";
+import { toast } from "@/lib/hooks/use-toast";
 
 type RegistrationStep = "basic" | "package" | "payment";
 type PackageType = "individual" | "business" | null;
+
+const User = z.object({
+    email: z.email("Invalid email."),
+    password: z.string()
+              .min(8, "Password must be at least 8 characters long.")
+              .max(32, "Password must not be longer than 32 characters."),
+});
 
 export default function Register() {
   const [step, setStep] = useState<RegistrationStep>("basic");
@@ -15,14 +24,57 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [packageType, setPackageType] = useState<PackageType>(null);
   const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardHolder, setCardHolder] = useState("");
   const [cardCVC, setCardCVC] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [cardCVCError, setCardCVCError] = useState("");
   const router = useRouter();
 
-  const handleBasicSubmit = (e: React.FormEvent) => {
+  const handleBasicSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (email && password) {
-      setStep("package");
+      const parseResult = User.safeParse({ email, password });
+      if (!parseResult.success) {
+        for (const iss of parseResult.error.issues) {
+          for (const field of iss.path) {
+            if (field === "email") {
+              setEmailError(iss.message);
+              setPasswordError("");
+              return;
+            }
+            else if (field === "password") {
+              setEmailError("");
+              setPasswordError(iss.message);
+              return;
+            }
+          }
+        }
+      }
+
+      try {
+        const response = await fetch('/api/register/check-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              email,
+          })
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+          setStep('package');
+        }
+        else {
+          setEmailError(data.message);
+          return;
+        }
+      } catch (error) {
+        toast({
+          title: "Registration Failed",
+          description: "An unknown error occurred",
+        });
+      }
     }
   };
 
@@ -31,13 +83,42 @@ export default function Register() {
     setStep("payment");
   };
 
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cardNumber && cardExpiry && cardCVC) {
-      // Mock registration - in real app, call API
-      localStorage.setItem("userEmail", email);
-      localStorage.setItem("packageType", packageType || "individual");
-      router.push("/account");
+    if (!cardNumber || !cardHolder || !cardCVC) {
+      return;
+    }
+
+    if (cardCVC.length !== 4) {
+      setCardCVCError("Verification code must be 4 digit long.");
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            email,
+            password,
+            packageType,
+          })
+      }); 
+      
+      const data = await response.json();
+      if (response.ok) {
+          router.push("/login"); 
+      } else {
+        toast({
+          title: "Registration Failed",
+          description: "An unknown error occurred",
+        });
+      }
+    } catch (error) {
+      toast({
+          title: "Registration Failed",
+          description: "An unknown error occurred",
+      });
     }
   };
 
@@ -73,6 +154,11 @@ export default function Register() {
                     className="w-full px-4 py-3 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     required
                   />
+                  {emailError && (
+                    <p className="mt-1 text-sm text-red-600 font-medium">
+                      {emailError}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -87,6 +173,12 @@ export default function Register() {
                     className="w-full px-4 py-3 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                     required
                   />
+
+                  {passwordError && (
+                    <p className="mt-1 text-sm text-red-600 font-medium">
+                      {passwordError}
+                    </p>
+                  )}
                 </div>
 
                 <Button
@@ -233,7 +325,7 @@ export default function Register() {
                     onChange={(e) => setCardNumber(e.target.value)}
                     placeholder="Enter account number or e-wallet ID"
                     className="w-full px-4 py-3 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    required={packageType === "business"}
+                    required
                   />
                 </div>
 
@@ -243,11 +335,11 @@ export default function Register() {
                   </label>
                   <input
                     type="text"
-                    value={cardExpiry}
-                    onChange={(e) => setCardExpiry(e.target.value)}
+                    value={cardHolder}
+                    onChange={(e) => setCardHolder(e.target.value)}
                     placeholder="Your full name"
                     className="w-full px-4 py-3 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    required={packageType === "business"}
+                    required
                   />
                 </div>
 
@@ -261,15 +353,19 @@ export default function Register() {
                     onChange={(e) => setCardCVC(e.target.value)}
                     placeholder="4-digit code"
                     className="w-full px-4 py-3 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    required={packageType === "business"}
+                    required
                   />
+                  {cardCVCError && (
+                    <p className="mt-1 text-sm text-red-600 font-medium">
+                      {cardCVCError}
+                    </p>
+                  )}
                 </div>
 
                 <Button
                   type="submit"
                   className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
-                >
-                  {packageType === "business" ? "Create Account & Subscribe" : "Create Account"}
+                >Create Account & Subscribe
                 </Button>
               </form>
 
