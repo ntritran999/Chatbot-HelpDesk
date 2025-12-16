@@ -18,19 +18,34 @@ export async function GET( request: Request ): Promise<Response> {
     try {
         const url = new URL(request.url);
         const userId = Number(url.searchParams.get('userId'));
+        const email = url.searchParams.get('email')?.toLowerCase();
 
-        if (!userId) {
+        if (!userId && !email) {
             return NextResponse.json(
-                { error: 'userId parameter is required' }, 
+                { error: 'userId or email parameter is required' }, 
                 { status: 400 }
             );
         }
 
         const groupsRef = collection(db, 'groups');
-        const q = query(groupsRef, where('sharedMemberID', 'array-contains', userId));
-        const snapshot = await getDocs(q);
-        const groups = snapshot.docs.map(doc => ({...doc.data()}));
-        return NextResponse.json({ groups }, { status: 200 });
+        const ownedPromise = userId
+            ? getDocs(query(groupsRef, where('ownerID', '==', userId)))
+            : Promise.resolve(null);
+
+        const sharedPromise = email
+            ? getDocs(query(groupsRef, where('sharedMembersEmail', 'array-contains', email)))
+            : Promise.resolve(null);
+
+        const [ownedSnap, sharedSnap] = await Promise.all([ownedPromise, sharedPromise]);
+
+        const ownedGroups = ownedSnap ? ownedSnap.docs.map(doc => ({ ...doc.data() })) : [];
+        const sharedGroups = sharedSnap ? sharedSnap.docs.map(doc => ({ ...doc.data() })) : [];
+
+        // Deduplicate by groupID if a group appears in both owned/shared
+        const ownedIds = new Set(ownedGroups.map((g: any) => g.groupID));
+        const uniqueShared = sharedGroups.filter((g: any) => !ownedIds.has(g.groupID));
+
+        return NextResponse.json({ ownedGroups, sharedGroups: uniqueShared }, { status: 200 });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to fetch groups' }, { status: 500 });
     }
@@ -96,13 +111,14 @@ export async function POST(request: Request) {
 }
 
 interface UpdateGroupRequest {
+    userID: number;
     groupID: number;
     Member_Emails: string;
 }
 
 export async function PUT(request: Request) {
     const body: UpdateGroupRequest = await request.json();
-    const { groupID, Member_Emails } = body;
+    const { userID, groupID, Member_Emails } = body;
 
     try{
         const groupsRef = collection(db, 'groups');
@@ -116,6 +132,12 @@ export async function PUT(request: Request) {
             }, { status: 404 });
         }
 
+        if (snapshot.docs[0].data().ownerID !== Number(userID)) {
+            return NextResponse.json({ 
+                message: 'You are not the owner of this group!',
+            }, { status: 403 });
+        }
+
         const groupDoc = snapshot.docs[0];
         await updateDoc(groupDoc.ref, {
             sharedMembersEmail: Member_Emails.split(',').map(email => email.trim()),
@@ -126,7 +148,7 @@ export async function PUT(request: Request) {
         }, { status: 200 });
 
     } catch (error) {
-        console.log(`Transaction failed: ${error}`);
+        console.log(`Error updating group: ${error}`);
     }
     return NextResponse.json({ 
         message: 'Update group failed with error',
