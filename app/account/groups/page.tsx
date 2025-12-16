@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Plus, Users, Edit2, Trash2 } from "lucide-react";
 import { useState, useEffect } from "react";
-
+import { useAuth } from "../AuthContext";
 interface Group {
   id: string;
   name: string;
@@ -11,12 +11,15 @@ interface Group {
   createdAt: string;
 }
 
+
+
 export default function Groups() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [memberEmails, setMemberEmails] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const user = useAuth();
 
   useEffect(() => {
     // Load groups from localStorage
@@ -115,7 +118,7 @@ export default function Groups() {
             <div>
               <h1 className="text-3xl font-bold text-slate-900 mb-2">Groups</h1>
               <p className="text-slate-600">
-                Manage team groups and share bots with members
+                Manage team groups and share bots with members .
               </p>
             </div>
             {!showCreateForm && (
