@@ -11,7 +11,7 @@ import { GET as getSession } from '@/app/api/session/route'
 
 // PUT method to update shared member email
 interface UpdateGroupRequest {
-    userID: number;
+    // userID: number;
     groupID: number;
     Member_Emails: string;
 }
