@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { saveBot } from "@/lib/bot.firestore";
 
 interface Group {
   id: string;
@@ -20,7 +21,7 @@ interface Group {
 export default function BotCreate() {
   const [model, setModel] = useState("gemini");
   const [botName, setBotName] = useState("");
-  const [knowledgeSource, setKnowledgeSource] = useState<"url" | "file" | null>(null);
+  const [knowledgeSource, setKnowledgeSource] = useState<"url" | "file" | "none">("none");
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [knowledgeText, setKnowledgeText] = useState(""); // NEW: extracted text
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
@@ -33,6 +34,14 @@ export default function BotCreate() {
   const [lastError, setLastError] = useState<string | null>(null);
   const packageType = typeof window !== "undefined" ? localStorage.getItem("packageType") || "individual" : "individual";
   const router = useRouter();
+
+  const [uploadedFile, setUploadedFile] = useState<{
+  provider: "drive";
+  url: string;
+  mimeType: string;
+  } | null>(null);
+
+  const [uploading, setUploading] = useState(false);
 
   // Mock groups
   const [availableGroups] = useState<Group[]>([
@@ -183,40 +192,71 @@ export default function BotCreate() {
   // ----------------------------
   // Create bot
   // ----------------------------
+  // const handleCreateBot = async () => {
+  //   if (!botName.trim()) {
+  //     alert("Please enter bot name");
+  //     return;
+  //   }
+
+  //   let finalKnowledgeText = knowledgeText;
+
+  //   try {
+  //     if (knowledgeSource === "url" && knowledgeUrl) {
+  //       finalKnowledgeText = await readWebsite(knowledgeUrl);
+  //       setKnowledgeText(finalKnowledgeText);
+  //     }
+  //   } catch (err: any) {
+  //     alert("Failed to read website: " + err.message);
+  //     return;
+  //   }
+
+  //   const storedBotsRaw = localStorage.getItem("bots");
+  //   const bots = storedBotsRaw ? JSON.parse(storedBotsRaw) : [];
+
+  //   const newBot = {
+  //     id: String(bots.length + 1),
+  //     name: botName,
+  //     model,
+  //     knowledgeUrl,
+  //     knowledgeText: finalKnowledgeText,
+  //     createdAt: new Date().toISOString(),
+  //   };
+
+  //   bots.push(newBot);
+  //   localStorage.setItem("bots", JSON.stringify(bots));
+
+  //   setBotCreated(true);
+  // };
+
   const handleCreateBot = async () => {
     if (!botName.trim()) {
-      alert("Please enter bot name");
+      alert("Bot name is required");
       return;
     }
 
-    let finalKnowledgeText = knowledgeText;
-
-    try {
-      if (knowledgeSource === "url" && knowledgeUrl) {
-        finalKnowledgeText = await readWebsite(knowledgeUrl);
-        setKnowledgeText(finalKnowledgeText);
-      }
-    } catch (err: any) {
-      alert("Failed to read website: " + err.message);
+    if (knowledgeSource === "none") {
+      alert("Please upload a file or enter a website URL");
       return;
     }
 
-    const storedBotsRaw = localStorage.getItem("bots");
-    const bots = storedBotsRaw ? JSON.parse(storedBotsRaw) : [];
+    const bot = {
+      botID: crypto.randomUUID(),
+      typeModel: model,
+      botName,
 
-    const newBot = {
-      id: String(bots.length + 1),
-      name: botName,
-      model,
-      knowledgeUrl,
-      knowledgeText: finalKnowledgeText,
-      createdAt: new Date().toISOString(),
+      websiteLink: knowledgeSource === "url" ? knowledgeUrl : undefined,
+      uploadFile: knowledgeSource === "file" ? uploadedFile : undefined,
+
+      adjustBotResponses: responseAdjustment.trim()
+        ? [{ question: "", answer: responseAdjustment.trim() }]
+        : [],
+
+      createdAt: Date.now(),
     };
 
-    bots.push(newBot);
-    localStorage.setItem("bots", JSON.stringify(bots));
+    await saveBot(bot);
 
-    setBotCreated(true);
+    router.push(`/account/bots/${bot.botID}`);
   };
 
 
@@ -314,24 +354,57 @@ export default function BotCreate() {
     fileInputRef.current?.click();
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
+  // async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  //   const f = e.target.files?.[0];
+  //   if (!f) return;
+  //   try {
+  //     setSending(true);
+  //     const resp = await uploadFileToServer(f);
+  //     const absolute = window.location.origin + resp.url;
+  //     setKnowledgeUrl(absolute);
+  //     setKnowledgeText(resp.text || "");
+  //     setKnowledgeSource("file");
+  //   } catch (err: any) {
+  //     console.error("Upload error", err);
+  //     alert("Upload failed: " + (err?.message ?? err));
+  //   } finally {
+  //     setSending(false);
+  //     if (fileInputRef.current) fileInputRef.current.value = "";
+  //   }
+  // }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+
     try {
-      setSending(true);
-      const resp = await uploadFileToServer(f);
-      const absolute = window.location.origin + resp.url;
-      setKnowledgeUrl(absolute);
-      setKnowledgeText(resp.text || "");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Upload failed");
+
+      const data = await res.json();
+
       setKnowledgeSource("file");
-    } catch (err: any) {
-      console.error("Upload error", err);
-      alert("Upload failed: " + (err?.message ?? err));
+      setKnowledgeUrl(""); // clear URL
+      setUploadedFile({
+        provider: "drive",
+        url: data.url,
+        mimeType: data.mimeType,
+      });
+    } catch (err) {
+      alert("Failed to upload file");
     } finally {
-      setSending(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setUploading(false);
     }
-  }
+  };
 
   return (
     <div className="p-8">
@@ -396,7 +469,7 @@ export default function BotCreate() {
                       </button>
 
                       {knowledgeSource === "url" && (
-                        <input type="url" value={knowledgeUrl} onChange={(e) => setKnowledgeUrl(e.target.value)} placeholder="https://example.com" className="w-full px-4 py-3 rounded-lg border border-slate-300" />
+                        <input type="url" value={knowledgeUrl} onChange={(e) => { setKnowledgeUrl(e.target.value); setKnowledgeSource("url"); setUploadedFile(null); }} placeholder="https://example.com" className="w-full px-4 py-3 rounded-lg border border-slate-300" />
                       )}
 
                       <button onClick={handleUploadClick} className={`w-full p-4 rounded-lg border-2 text-left ${knowledgeSource === "file" ? "border-blue-500 bg-blue-50" : "border-slate-300 hover:border-blue-300"}`}>
@@ -441,7 +514,7 @@ export default function BotCreate() {
 
               <div className="bg-white rounded-lg border border-slate-200 p-6">
                 <h3 className="font-bold mb-4">Adjust Bot Response</h3>
-                <textarea value={responseAdjustment} onChange={(e) => setResponseAdjustment(e.target.value)} rows={4} className="w-full border rounded-lg p-3" />
+                <textarea value={responseAdjustment} onChange={(e) => setResponseAdjustment(e.target.value)} rows={4} placeholder="How should the bot respond?" className="w-full border rounded-lg p-3" />
               </div>
             </div>
 
