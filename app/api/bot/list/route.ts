@@ -33,11 +33,11 @@ export async function GET(req: NextRequest) {
 
     const userData = userDoc.data();
     const email = userData.email || "";
-    const userIDNumber = userData.userID || userData.userId || 0; // Get numeric userID from user data
+    const userIDNumber = userData.userID || userData.userId || 0;
 
     const allBotConfigDocs: any[] = [];
 
-    // Get public bots (owner = 0) - excluding Customer Support Bot
+    // Get public bots (owner = 0)
     const publicBotsQuery = query(
       collection(db, "botConfigAgent"),
       where("owner", "==", 0)
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     });
     allBotConfigDocs.push(...filteredPublicBots);
 
-    // Get user's own bots (owner = userId)
+    // Get user's own bots
     if (userIDNumber) {
       const myBotsQuery = query(
         collection(db, "botConfigAgent"),
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
       allBotConfigDocs.push(...myBotsSnapshot.docs);
     }
 
-    // Get shared bots via groups (email in sharedMembersEmail)
+    // Get shared bots via groups
     if (email) {
       const sharedGroupsQuery = query(
         collection(db, "groups"),
@@ -106,6 +106,7 @@ export async function GET(req: NextRequest) {
     });
 
     const allBots: any[] = [];
+    const ownedBots: any[] = [];
     const botsWithHistory: any[] = [];
 
     // Add Customer Support Bot
@@ -116,8 +117,10 @@ export async function GET(req: NextRequest) {
       hasHistory: true,
       active: true,
       botID: 0,
+      isOwned: false,
     };
     allBots.push(customerSupportBot);
+    ownedBots.push(customerSupportBot);
     botsWithHistory.push(customerSupportBot);
 
     // Process each bot config
@@ -131,28 +134,43 @@ export async function GET(req: NextRequest) {
       }
 
       const botAgentInfo = botAgentMapByBotId.get(botID);
+      const isOwner = botConfigData.owner === userIDNumber;
 
       const botInfo = {
-        id: botConfigDoc.id, // Always use botConfigDoc.id for unique key
+        id: botConfigDoc.id,
         botID: botID,
         name: botConfigData.botName || "Unnamed Bot",
         model: botConfigData.typeModel || "GPT-4",
         hasHistory: false,
         active: botConfigData.active ?? true,
         createdAt: botConfigData.createdAt || null,
-        botAgentId: botAgentInfo?.docId || null, // Store botAgent ID separately if needed
+        botAgentId: botAgentInfo?.docId || null,
+        isOwned: isOwner,
       };
 
       allBots.push(botInfo);
 
-      // Check if this bot has any chats
+      if (isOwner) {
+        ownedBots.push(botInfo);
+      }
+
       if (botAgentInfo) {
         const chatsQuery = query(
           collection(db, "botAgent", botAgentInfo.docId, "chats")
         );
         const chatsSnapshot = await getDocs(chatsQuery);
 
-        if (!chatsSnapshot.empty) {
+        // Filter to only include chats from current user
+        let hasUserChat = false;
+        chatsSnapshot.forEach((chatDoc) => {
+          const chatData = chatDoc.data();
+          const chatUserID = chatData.userID || chatData.userId || 0;
+          if (chatUserID === userIDNumber) {
+            hasUserChat = true;
+          }
+        });
+
+        if (hasUserChat) {
           botsWithHistory.push({
             ...botInfo,
             hasHistory: true,
@@ -163,8 +181,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      allBots,
-      botsWithHistory,
+      allBots, // All bots user can access (for chat)
+      ownedBots, // Only bots user owns (for create_bot page)
+      botsWithHistory, // Bots with chat history
     });
   } catch (error: any) {
     console.error("Error fetching bots:", error);

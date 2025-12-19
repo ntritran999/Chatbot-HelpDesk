@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addDoc, collection, runTransaction, doc } from "firebase/firestore";
+import { addDoc, collection, runTransaction, doc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/app";
 
 export async function POST(request: Request) {
@@ -20,13 +20,8 @@ export async function POST(request: Request) {
             return newCurrent;
         });
 
-        await addDoc(collection(db, "botAgent"), {
-            botApi: "",
-            botID: newId,
-            embed: ""
-        });
-
-        await addDoc(collection(db, "botConfigAgent"), {
+        // Create botConfigAgent document first to get auto-generated ID
+        const botConfigRef = await addDoc(collection(db, "botConfigAgent"), {
             active: true,
             adjustBotResponses: adjustBotResponses,
             botID: newId,
@@ -37,9 +32,16 @@ export async function POST(request: Request) {
             websiteLink: websiteLink
         });
 
+        // Create botAgent document with matching ID
+        await setDoc(doc(db, "botAgent", botConfigRef.id), {
+            botApi: "",
+            botID: newId,
+            embed: ""
+        });
+
         return NextResponse.json({ 
             message: 'Create bot successful!',
-            
+            botId: botConfigRef.id
         }, { status: 201 });
 
     } catch (error) {

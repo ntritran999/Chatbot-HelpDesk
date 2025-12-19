@@ -59,10 +59,15 @@ export async function PATCH(
     }
 
     const botData = botDoc.data();
+    if (botData.owner === 0) {
+      return NextResponse.json(
+        { error: "Forbidden - Cannot modify Customer Support Bot" },
+        { status: 403 }
+      );
+    }
 
     // Only owner can update bot status
-    // Allow if owner = 0 (public bot) or owner matches userId
-    if (botData.owner !== 0 && botData.owner !== userIDNumber) {
+    if (botData.owner !== userIDNumber) {
       return NextResponse.json(
         { error: "Forbidden - You don't have permission to update this bot" },
         { status: 403 }

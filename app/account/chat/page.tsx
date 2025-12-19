@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Send, Trash2, Plus, X, ShieldAlert, CircleAlert } from "lucide-react";
+import { Send, Trash2, Plus, X, ShieldAlert, CircleAlert, Users } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/app/account/AuthContext";
 import { Alert } from "@/components/ui/alert";
@@ -21,6 +21,17 @@ interface Bot {
   hasHistory?: boolean;
   active?: boolean;
   botAgentId?: string | null;
+}
+
+interface Group {
+  id: string;
+  groupID: number;
+  groupName: string;
+  ownerID: number;
+  members: string[];
+  totalMembers: number;
+  isOwner: boolean;
+  createdAt: string | null;
 }
 
 // Format timestamp based on whether it's today or not
@@ -61,6 +72,11 @@ export default function Chat() {
   const [showBotModal, setShowBotModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Groups state
+  const [botGroups, setBotGroups] = useState<Group[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [showGroupsModal, setShowGroupsModal] = useState(false);
 
   // logic to alert ticket
   const [showReportModal, setShowReportModal] = useState(false);
@@ -192,11 +208,36 @@ export default function Chat() {
     const chatBotId = selectedBotFromAll?.botAgentId || botId;
 
     await loadChatHistory(chatBotId);
+    await loadBotGroups(botId); // Load groups when selecting bot
     setShowBotModal(false);
   };
 
   const handleNewChat = () => {
     setShowBotModal(true);
+  };
+
+  const loadBotGroups = async (botId: string) => {
+    if (botId === CUSTOMER_SUPPORT_BOT_ID) {
+      setBotGroups([]);
+      return;
+    }
+
+    try {
+      setLoadingGroups(true);
+      const response = await fetch(`/api/bot/${botId}/groups`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to load bot groups');
+      }
+      
+      const data = await response.json();
+      setBotGroups(data.groups || []);
+    } catch (error: any) {
+      console.error("Error loading bot groups:", error);
+      setBotGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
   };
 
   const handleClearChat = async (botId: string) => {
@@ -393,12 +434,35 @@ export default function Chat() {
         <div className="flex-1 bg-white rounded-lg border border-slate-200 flex flex-col">
           {/* Header */}
           <div className="border-b border-slate-200 p-6">
-            <h1 className="text-lg font-bold text-slate-900">
-              {selectedBot
-                ? bots.find((b) => b.id === selectedBot)?.name || "Select a bot"
-                : "Select a bot"}
-            </h1>
-            <p className="text-sm text-slate-600">Chat with your bot</p>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h1 className="text-lg font-bold text-slate-900">
+                  {selectedBot
+                    ? bots.find((b) => b.id === selectedBot)?.name || "Select a bot"
+                    : "Select a bot"}
+                </h1>
+                <p className="text-sm text-slate-600">Chat with your bot</p>
+                
+                {/* Show groups */}
+                {selectedBot && selectedBot !== CUSTOMER_SUPPORT_BOT_ID && (
+                  <div className="mt-3">
+                    {loadingGroups ? (
+                      <p className="text-xs text-slate-500">Loading groups...</p>
+                    ) : botGroups.length > 0 ? (
+                      <button
+                        onClick={() => setShowGroupsModal(true)}
+                        className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>{botGroups.length} {botGroups.length === 1 ? 'group' : 'groups'}</span>
+                      </button>
+                    ) : (
+                      <p className="text-xs text-slate-500">No groups</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Messages */}
@@ -563,6 +627,69 @@ export default function Chat() {
                   </Button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Groups Modal */}
+        {showGroupsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Groups with {bots.find((b) => b.id === selectedBot)?.name}
+                </h2>
+                <button
+                  title="Close"
+                  onClick={() => setShowGroupsModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {botGroups.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">
+                  This bot is not shared in any groups you&apos;re a member of.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {botGroups.map((group) => (
+                    <div
+                      key={group.id}
+                      className="p-4 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-900 text-lg mb-1">
+                            {group.groupName}
+                          </h3>
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-600">
+                              {group.isOwner ? (
+                                <span className="inline-flex items-center gap-1 text-blue-600">
+                                  <Users className="w-3 h-3" />
+                                  Owner
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">Member</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {group.totalMembers} {group.totalMembers === 1 ? 'member' : 'members'}
+                            </p>
+                            {group.createdAt && (
+                              <p className="text-xs text-slate-400">
+                                Created: {new Date(group.createdAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

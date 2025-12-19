@@ -19,8 +19,8 @@ export async function generateResponse(options: {
 }) {
   const { model, userMessage, context = "", chatHistory = [] } = options;
 
-  // Select model (default to gemini-pro if not specified)
-  const modelName = model?.toLowerCase().includes("gemini") ? model : "gemini-pro";
+  // Select model (default to gemini-2.5-flash if not specified)
+  const modelName = model?.toLowerCase().includes("gemini") ? model : "gemini-2.5-flash";
   const generativeModel = genAI.getGenerativeModel({ model: modelName });
 
   // Build prompt with context and history

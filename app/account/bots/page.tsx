@@ -38,7 +38,8 @@ export default function Bots() {
 
         const data = await response.json();
 
-        const botsList: BotItem[] = data.allBots.map((bot: any) => ({
+        // Only show bots that user OWNS (not shared bots)
+        const botsList: BotItem[] = data.ownedBots.map((bot: any) => ({
           id: bot.id,
           botID: bot.botID,
           name: bot.name,

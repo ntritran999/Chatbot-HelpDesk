@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { collection, query, orderBy, getDocs, deleteDoc } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, deleteDoc, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/app";
 import { decrypt } from "@/lib/session";
 import { cookies } from "next/headers";
@@ -23,6 +23,15 @@ export async function GET(
     }
 
     const userId = session.userId as string;
+
+    // Get user data to extract numeric userID
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+    if (!userDoc.exists()) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const userData = userDoc.data();
+    const currentUserID = userData.userID || userData.userId || 0;
 
     // Special handling for Customer Support Bot
     if (botId === "customer-support") {
@@ -50,6 +59,12 @@ export async function GET(
       const chatHistory: any[] = [];
       chatsSnapshot.forEach((doc) => {
         const data = doc.data();
+        
+        // Only show chats from current user
+        const chatUserID = data.userID || data.userId || 0;
+        if (chatUserID !== currentUserID) {
+          return;
+        }
 
         // Add user message
         if (data.message) {
@@ -77,7 +92,6 @@ export async function GET(
         messages: chatHistory,
       });
     } catch (error) {
-      // If bot doesn't have chat collection yet, return empty messages
       console.log(`No chat history for bot ${botId}:`, error);
       return NextResponse.json({
         success: true,
@@ -113,6 +127,15 @@ export async function DELETE(
 
     const userId = session.userId as string;
 
+    // Get user data to extract numeric userID
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+    if (!userDoc.exists()) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const userData = userDoc.data();
+    const currentUserID = userData.userID || userData.userId || 0;
+
     // Cannot clear Customer Support Bot history
     if (botId === "customer-support") {
       return NextResponse.json(
@@ -121,12 +144,19 @@ export async function DELETE(
       );
     }
 
-    // Delete all chat documents from Firebase
+    // Delete chat documents from Firebase (only current user's chats)
     const chatsRef = collection(db, "botAgent", botId, "chats");
     const chatsSnapshot = await getDocs(chatsRef);
 
-    // Delete all chat documents
-    const deletePromises = chatsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+    // Filter and delete only current user's chats
+    const deletePromises = chatsSnapshot.docs
+      .filter(chatDoc => {
+        const chatData = chatDoc.data();
+        const chatUserID = chatData.userID || chatData.userId || 0;
+        return chatUserID === currentUserID;
+      })
+      .map(chatDoc => deleteDoc(chatDoc.ref));
+    
     await Promise.all(deletePromises);
 
     return NextResponse.json({

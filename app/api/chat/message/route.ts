@@ -20,6 +20,15 @@ export async function POST(req: NextRequest) {
 
     const userId = session.userId as string;
 
+    // Get user data to extract numeric userID
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+    if (!userDoc.exists()) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const userData = userDoc.data();
+    const userIDNumber = userData.userID || userData.userId || 0;
+
     const body = await req.json();
     const { botId, message } = body;
 
@@ -50,7 +59,7 @@ export async function POST(req: NextRequest) {
       // Use basic AI response for customer support
       try {
         const aiResponse = await generateResponse({
-          model: "gemini-pro",
+          model: "gemini-1.5-flash",
           userMessage: message,
           context: "You are a helpful customer support assistant. Be polite, professional, and helpful.",
           chatHistory: [],
@@ -101,24 +110,21 @@ export async function POST(req: NextRequest) {
 
     if (!botDoc.exists()) {
       console.log(`Bot ${botId} not found in botAgent collection`);
-      // Bot might not have been initialized yet, try to create basic response
-      // without context
       try {
         const aiResponse = await generateResponse({
-          model: "gemini-pro",
+          model: "gemini-2.5-flash",
           userMessage: message,
           context: "",
           chatHistory: [],
         });
 
-        // Try to create botAgent document with first message
         try {
           const chatRef = collection(db, "botAgent", botId, "chats");
           const docRef = await addDoc(chatRef, {
             message: message,
             response: aiResponse,
             timestamp: serverTimestamp(),
-            userID: userId, // Save as string, not parsed int
+            userID: userIDNumber,
           });
 
           return NextResponse.json({
@@ -171,7 +177,6 @@ export async function POST(req: NextRequest) {
     if (botData.botID) {
       const botConfigQuery = query(
         collection(db, "botConfigAgent"),
-        // We'll need to find by botID
       );
       const botConfigSnapshot = await getDocs(botConfigQuery);
       botConfigSnapshot.forEach((doc) => {
@@ -181,7 +186,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const modelType = botConfig?.typeModel || "gemini-pro";
+    const modelType = botConfig?.typeModel || "gemini-1.5-flash";
     const botContext = botData.context || botData.knowledge || "";
 
     // Get recent chat history for context
@@ -227,7 +232,7 @@ export async function POST(req: NextRequest) {
       message: message,
       response: botResponseText,
       timestamp: serverTimestamp(),
-      userID: parseInt(userId),
+      userID: userIDNumber,
     });
 
     return NextResponse.json({
