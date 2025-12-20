@@ -5,6 +5,7 @@ import {
     doc, 
     runTransaction, 
     Timestamp,
+    Number,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/app';
 import { GET as getSession } from '@/app/api/session/route'
@@ -63,11 +64,13 @@ export async function POST(request: NextRequest) {
         });
 
         // add new group to database (firebase)
+
         await addDoc(collection(db, "groups"), {
             ownerID: ownerID,
             groupID: newId,
             groupName: groupName,
             sharedMembersEmail: Member_Emails.split(',').map(email => email.trim()),
+            sharedBotID: [],
             create_at: Timestamp.now(),
         })
 
