@@ -1,10 +1,8 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Send, Trash2, Plus, X, ShieldAlert, CircleAlert } from "lucide-react";
+import { Send, Trash2, Plus, X, ShieldAlert, CircleAlert, Users } from "lucide-react";
 import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
-import { db } from "@/lib/firebase/app";
 import { useAuth } from "@/app/account/AuthContext";
 import { Alert } from "@/components/ui/alert";
 
@@ -22,6 +20,18 @@ interface Bot {
   status?: string;
   hasHistory?: boolean;
   active?: boolean;
+  botAgentId?: string | null;
+}
+
+interface Group {
+  id: string;
+  groupID: number;
+  groupName: string;
+  ownerID: number;
+  members: string[];
+  totalMembers: number;
+  isOwner: boolean;
+  createdAt: string | null;
 }
 
 // Format timestamp based on whether it's today or not
@@ -35,13 +45,13 @@ const formatTimestamp = (timestamp: Date): string => {
     msgDate.getFullYear() === now.getFullYear();
 
   if (isToday) {
-    // Just show time: "10:42 AM"
+    // "10:42 AM"
     return msgDate.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
     });
   } else {
-    // Show date and time: "Dec 16, 2025 10:42 AM"
+    // "Dec 16, 2025 10:42 AM"
     return msgDate.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
@@ -57,17 +67,22 @@ export default function Chat() {
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [bots, setBots] = useState<Bot[]>([]); // Bots có lịch sử chat (hiển thị trong sidebar)
-  const [allBots, setAllBots] = useState<Bot[]>([]); // Tất cả bot của user (hiển thị trong modal)
+  const [bots, setBots] = useState<Bot[]>([])
+  const [allBots, setAllBots] = useState<Bot[]>([]);
   const [showBotModal, setShowBotModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Groups state
+  const [botGroups, setBotGroups] = useState<Group[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [showGroupsModal, setShowGroupsModal] = useState(false);
 
   // logic to alert ticket
   const [showReportModal, setShowReportModal] = useState(false);
   const [ticketName, setTicketName] = useState("");
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
 
-  // Customer Support Bot - always visible and active
   const CUSTOMER_SUPPORT_BOT_ID = "customer-support";
   const CUSTOMER_SUPPORT_BOT: Bot = {
     id: CUSTOMER_SUPPORT_BOT_ID,
@@ -78,7 +93,6 @@ export default function Chat() {
   };
 
   useEffect(() => {
-    // Wait for auth to finish loading
     if (authLoading) {
       return;
     }
@@ -86,126 +100,36 @@ export default function Chat() {
     async function loadBotsWithHistory() {
       try {
         setLoading(true);
+        setError(null);
         
-        const allBotConfigDocs: any[] = [];
+        const response = await fetch('/api/bot/list');
         
-        // 1. Get public bots (owner = 0) - excluding Customer Support Bot to avoid duplication
-        const publicBotsQuery = query(
-          collection(db, "botConfigAgent"),
-          where("owner", "==", 0)
-        );
-        const publicBotsSnapshot = await getDocs(publicBotsQuery);
-        // Filter out any bot named "Customer Support Bot" to avoid duplication
-        const filteredPublicBots = publicBotsSnapshot.docs.filter(doc => {
-          const data = doc.data();
-          return data.botName !== "Customer Support Bot";
-        });
-        allBotConfigDocs.push(...filteredPublicBots);
-        
-        // 2. Get user's own bots (owner = userId) - only if userId exists
-        if (userId) {
-          const myBotsQuery = query(
-            collection(db, "botConfigAgent"),
-            where("owner", "==", parseInt(userId))
-          );
-          const myBotsSnapshot = await getDocs(myBotsQuery);
-          allBotConfigDocs.push(...myBotsSnapshot.docs);
+        if (!response.ok) {
+          throw new Error('Failed to fetch bots');
         }
         
-        // 3. Get shared bots via groups (email in sharedMembersEmail) - only if email exists
-        if (email) {
-          const sharedGroupsQuery = query(
-            collection(db, "groups"),
-            where("sharedMembersEmail", "array-contains", email)
-          );
-          const sharedGroupsSnapshot = await getDocs(sharedGroupsQuery);
-          
-          // Get botIDs from shared groups using sharedBotID array
-          const sharedBotIDs = new Set<number>();
-          sharedGroupsSnapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.sharedBotID && Array.isArray(data.sharedBotID)) {
-              data.sharedBotID.forEach((botId: number) => {
-                sharedBotIDs.add(botId);
-              });
-            }
-          });
-          
-          // Add shared bots that aren't already in the list
-          if (sharedBotIDs.size > 0) {
-            for (const botID of sharedBotIDs) {
-              const sharedBotQuery = query(
-                collection(db, "botConfigAgent"),
-                where("botID", "==", botID)
-              );
-              const sharedBotSnapshot = await getDocs(sharedBotQuery);
-              sharedBotSnapshot.docs.forEach((doc) => {
-                // Only add if not already in the list
-                if (!allBotConfigDocs.some(d => d.id === doc.id)) {
-                  allBotConfigDocs.push(doc);
-                }
-              });
-            }
-          }
-        }
+        const data = await response.json();
+
+        const allUserBots: Bot[] = data.allBots.map((bot: any) => ({
+          id: bot.id,
+          name: bot.name,
+          model: bot.model,
+          hasHistory: bot.hasHistory,
+          active: bot.active,
+          botAgentId: bot.botAgentId || null,
+        }));
         
-        // Get ALL documents from botAgent collection (no filter, we'll match by botID)
-        const botAgentSnapshot = await getDocs(collection(db, "botAgent"));
+        const botsWithHistory: Bot[] = data.botsWithHistory.map((bot: any) => ({
+          id: bot.id,
+          name: bot.name,
+          model: bot.model,
+          hasHistory: bot.hasHistory,
+          active: bot.active,
+          botAgentId: bot.botAgentId || null,
+        }));
         
-        // Create a map of botAgent data by botID for quick lookup
-        const botAgentMapByBotId = new Map();
-        botAgentSnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data.botID) {
-            botAgentMapByBotId.set(data.botID, { docId: doc.id, data });
-          }
-        });
-        
-        const allUserBots: Bot[] = [CUSTOMER_SUPPORT_BOT];
-        const botsWithHistory: Bot[] = [CUSTOMER_SUPPORT_BOT];
-        
-        // Process each bot config
-        for (const botConfigDoc of allBotConfigDocs) {
-          const botConfigData = botConfigDoc.data();
-          const botID = botConfigData.botID;
-          
-          // Skip if this is a duplicate Customer Support Bot from database
-          if (botConfigData.botName === "Customer Support Bot") {
-            continue;
-          }
-          
-          // Check if this bot exists in botAgent (has chat structure)
-          const botAgentInfo = botAgentMapByBotId.get(botID);
-          
-          const botInfo: Bot = {
-            id: botAgentInfo?.docId || botConfigDoc.id, // Use botAgent ID if exists, otherwise botConfig ID
-            name: botConfigData.botName || "Unnamed Bot",
-            model: botConfigData.typeModel || "GPT-4",
-            hasHistory: false,
-            active: botConfigData.active ?? true, // Default to true if not set
-          };
-          
-          // Add to all bots
-          allUserBots.push(botInfo);
-          
-          // Check if this bot has any chats (only if exists in botAgent)
-          if (botAgentInfo) {
-            const chatsQuery = query(
-              collection(db, "botAgent", botAgentInfo.docId, "chats")
-            );
-            const chatsSnapshot = await getDocs(chatsQuery);
-            
-            if (!chatsSnapshot.empty) {
-              botsWithHistory.push({
-                ...botInfo,
-                hasHistory: true,
-              });
-            }
-          }
-        }
-        
-        setAllBots(allUserBots); // Tất cả bot (cho modal New Chat)
-        setBots(botsWithHistory); // Chỉ bot có lịch sử (cho sidebar)
+        setAllBots(allUserBots);
+        setBots(botsWithHistory);
         
         // Auto-select Customer Support Bot if no bot is selected
         if (botsWithHistory.length > 0) {
@@ -213,8 +137,9 @@ export default function Chat() {
           await loadChatHistory(CUSTOMER_SUPPORT_BOT_ID);
         }
         
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error loading bots:", error);
+        setError(error.message || "Failed to load bots");
       } finally {
         setLoading(false);
       }
@@ -223,12 +148,26 @@ export default function Chat() {
     loadBotsWithHistory();
   }, [userId, email, authLoading]);
 
-  // Load chat history for a specific bot
   const loadChatHistory = async (botDocId: string) => {
     try {
-      if (botDocId === CUSTOMER_SUPPORT_BOT_ID) {
-        // For Customer Support Bot, you might have a different collection
-        // For now, show welcome message
+      const response = await fetch(`/api/chat/history/${botDocId}`);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Failed to load chat history:', errorData);
+        throw new Error(errorData.error || 'Failed to load chat history');
+      }
+      
+      const data = await response.json();
+
+      const chatHistory: ChatMessage[] = data.messages.map((msg: any) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+      }));
+      
+      if (chatHistory.length === 0) {
         setMessages([
           {
             id: "welcome",
@@ -237,43 +176,10 @@ export default function Chat() {
             timestamp: new Date(),
           },
         ]);
-        return;
+      } else {
+        setMessages(chatHistory);
       }
-
-      // Load chat history from Firebase
-      const chatsQuery = query(
-        collection(db, "botAgent", botDocId, "chats"),
-        orderBy("timestamp", "asc")
-      );
-      const chatsSnapshot = await getDocs(chatsQuery);
-      
-      const chatHistory: ChatMessage[] = [];
-      chatsSnapshot.forEach((doc) => {
-        const data = doc.data();
-        
-        // Add user message
-        if (data.message) {
-          chatHistory.push({
-            id: `${doc.id}-user`,
-            role: "user",
-            content: data.message,
-            timestamp: data.timestamp?.toDate() || new Date(),
-          });
-        }
-        
-        // Add bot response
-        if (data.response) {
-          chatHistory.push({
-            id: `${doc.id}-bot`,
-            role: "bot",
-            content: data.response,
-            timestamp: data.timestamp?.toDate() || new Date(),
-          });
-        }
-      });
-      
-      setMessages(chatHistory);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error loading chat history:", error);
       setMessages([
         {
@@ -288,20 +194,21 @@ export default function Chat() {
 
   const handleSelectBot = async (botId: string) => {
     setSelectedBot(botId);
-    
-    // Check if bot is already in sidebar (bots with history)
+
     const botInSidebar = bots.find(b => b.id === botId);
     
     if (!botInSidebar) {
-      // Bot not in sidebar yet, add it from allBots
       const selectedBotInfo = allBots.find(b => b.id === botId);
       if (selectedBotInfo) {
         setBots([...bots, selectedBotInfo]);
       }
     }
     
-    // Load chat history for this bot
-    await loadChatHistory(botId);
+    const selectedBotFromAll = allBots.find(b => b.id === botId);
+    const chatBotId = selectedBotFromAll?.botAgentId || botId;
+
+    await loadChatHistory(chatBotId);
+    await loadBotGroups(botId); // Load groups when selecting bot
     setShowBotModal(false);
   };
 
@@ -309,18 +216,48 @@ export default function Chat() {
     setShowBotModal(true);
   };
 
+  const loadBotGroups = async (botId: string) => {
+    if (botId === CUSTOMER_SUPPORT_BOT_ID) {
+      setBotGroups([]);
+      return;
+    }
+
+    try {
+      setLoadingGroups(true);
+      const response = await fetch(`/api/bot/${botId}/groups`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to load bot groups');
+      }
+      
+      const data = await response.json();
+      setBotGroups(data.groups || []);
+    } catch (error: any) {
+      console.error("Error loading bot groups:", error);
+      setBotGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
   const handleClearChat = async (botId: string) => {
     try {
-      // Delete all chat documents from Firebase
-      if (botId !== CUSTOMER_SUPPORT_BOT_ID) {
-        const { getDocs, deleteDoc, collection: firestoreCollection, query } = await import('firebase/firestore');
-        const chatsRef = firestoreCollection(db, "botAgent", botId, "chats");
-        const chatsQuery = query(chatsRef);
-        const chatsSnapshot = await getDocs(chatsQuery);
-        
-        // Delete all chat documents
-        const deletePromises = chatsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
+      if (botId === CUSTOMER_SUPPORT_BOT_ID) {
+        alert('Cannot clear Customer Support Bot history');
+        return;
+      }
+
+      // Get the correct botAgentId for API call
+      const botInfo = bots.find(b => b.id === botId);
+      const apiBotId = botInfo?.botAgentId || botId;
+
+      const response = await fetch(`/api/chat/history/${apiBotId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to clear chat history');
       }
       
       // Remove bot from sidebar
@@ -331,8 +268,9 @@ export default function Chat() {
         setSelectedBot(CUSTOMER_SUPPORT_BOT_ID);
         await loadChatHistory(CUSTOMER_SUPPORT_BOT_ID);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error clearing chat history:", error);
+      alert(error.message || 'Failed to clear chat history');
     }
   };
 
@@ -342,34 +280,45 @@ export default function Chat() {
     const userMessage = input;
     setInput("");
 
-    if (selectedBot !== CUSTOMER_SUPPORT_BOT_ID) {
-      const { addDoc, collection: firestoreCollection, serverTimestamp } =
-        await import("firebase/firestore");
-
-      const chatRef = firestoreCollection(db, "botAgent", selectedBot, "chats");
-
-      const docRef = await addDoc(chatRef, {
-        message: userMessage,
-        response: "Thanks for your message! How else can I assist you?",
-        timestamp: serverTimestamp(),
-        userID: parseInt(userId || "0"),
+    try {
+      const response = await fetch('/api/chat/message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          botId: selectedBot,
+          message: userMessage,
+        }),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || errorData.details || 'Failed to send message');
+      }
+
+      const data = await response.json();
 
       setMessages((prev) => [
         ...prev,
         {
-          id: `${docRef.id}-user`,
+          id: data.userMessage.id,
           role: "user",
-          content: userMessage,
-          timestamp: new Date(),
+          content: data.userMessage.content,
+          timestamp: new Date(data.userMessage.timestamp),
         },
         {
-          id: `${docRef.id}-bot`,
+          id: data.botResponse.id,
           role: "bot",
-          content: "Thanks for your message! How else can I assist you?",
-          timestamp: new Date(),
+          content: data.botResponse.content,
+          timestamp: new Date(data.botResponse.timestamp),
         },
       ]);
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      alert(error.message || 'Failed to send message. Please try again.');
+      setInput(userMessage); // Restore message on error
     }
   };
 
@@ -485,12 +434,35 @@ export default function Chat() {
         <div className="flex-1 bg-white rounded-lg border border-slate-200 flex flex-col">
           {/* Header */}
           <div className="border-b border-slate-200 p-6">
-            <h1 className="text-lg font-bold text-slate-900">
-              {selectedBot
-                ? bots.find((b) => b.id === selectedBot)?.name || "Select a bot"
-                : "Select a bot"}
-            </h1>
-            <p className="text-sm text-slate-600">Chat with your bot</p>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h1 className="text-lg font-bold text-slate-900">
+                  {selectedBot
+                    ? bots.find((b) => b.id === selectedBot)?.name || "Select a bot"
+                    : "Select a bot"}
+                </h1>
+                <p className="text-sm text-slate-600">Chat with your bot</p>
+                
+                {/* Show groups */}
+                {selectedBot && selectedBot !== CUSTOMER_SUPPORT_BOT_ID && (
+                  <div className="mt-3">
+                    {loadingGroups ? (
+                      <p className="text-xs text-slate-500">Loading groups...</p>
+                    ) : botGroups.length > 0 ? (
+                      <button
+                        onClick={() => setShowGroupsModal(true)}
+                        className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>{botGroups.length} {botGroups.length === 1 ? 'group' : 'groups'}</span>
+                      </button>
+                    ) : (
+                      <p className="text-xs text-slate-500">No groups</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Messages */}
@@ -571,6 +543,7 @@ export default function Chat() {
                   Select a Bot
                 </h2>
                 <button
+                  title="Close"
                   onClick={() => setShowBotModal(false)}
                   className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                 >
@@ -579,8 +552,8 @@ export default function Chat() {
               </div>
 
               <div className="space-y-3">
-                {allBots.filter(bot => bot.active !== false).length > 0 ? (
-                  allBots.filter(bot => bot.active !== false).map((bot) => (
+                {allBots.length > 0 ? (
+                  allBots.map((bot) => (
                     <button
                       key={bot.id}
                       onClick={() => handleSelectBot(bot.id)}
@@ -654,6 +627,69 @@ export default function Chat() {
                   </Button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Groups Modal */}
+        {showGroupsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Groups with {bots.find((b) => b.id === selectedBot)?.name}
+                </h2>
+                <button
+                  title="Close"
+                  onClick={() => setShowGroupsModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {botGroups.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">
+                  This bot is not shared in any groups you&apos;re a member of.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {botGroups.map((group) => (
+                    <div
+                      key={group.id}
+                      className="p-4 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-900 text-lg mb-1">
+                            {group.groupName}
+                          </h3>
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-600">
+                              {group.isOwner ? (
+                                <span className="inline-flex items-center gap-1 text-blue-600">
+                                  <Users className="w-3 h-3" />
+                                  Owner
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">Member</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {group.totalMembers} {group.totalMembers === 1 ? 'member' : 'members'}
+                            </p>
+                            {group.createdAt && (
+                              <p className="text-xs text-slate-400">
+                                Created: {new Date(group.createdAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
