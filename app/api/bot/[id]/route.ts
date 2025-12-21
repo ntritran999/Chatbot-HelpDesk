@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { doc, getDoc, deleteDoc, collection, getDocs, query } from "firebase/firestore";
+import { doc, getDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase/app";
 import { decrypt } from "@/lib/session";
 import { cookies } from "next/headers";
+
 
 export async function DELETE(
   req: NextRequest,
@@ -107,3 +108,46 @@ export async function DELETE(
     );
   }
 }
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }) { {
+  try {
+    const { id } = await params;
+    console.log("Fetching bot with ID:", id);
+    
+    // Try to get by document ID first
+    const botRef = doc(db, "botConfigAgent", id);
+    const botDoc = await getDoc(botRef);
+    
+    if (botDoc.exists()) {
+      const data = botDoc.data();
+      console.log("Fetched bot data by doc ID:", data);
+      return NextResponse.json(data, { status: 200 });
+    }
+    
+    // If not found, try by numeric botID
+    const numericId = parseInt(id);
+    if (!isNaN(numericId)) {
+      const q = query(collection(db, "botConfigAgent"), where("botID", "==", numericId));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const docSnap = querySnapshot.docs[0];
+        const data = docSnap.data();
+        console.log("Fetched bot data by botID:", data);
+        return NextResponse.json(data, { status: 200 });
+      }
+    }
+    
+    return NextResponse.json({
+      message: "Bot not found"
+    }, { status: 404 });
+  } catch (error: any) {
+    console.error("Error fetching bot:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch bot", details: error.message },
+      { status: 500 }
+    );
+  }
+} }

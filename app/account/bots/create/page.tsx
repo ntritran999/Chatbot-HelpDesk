@@ -15,6 +15,7 @@ import { saveBot } from "@/lib/bot.firestore";
 import { toast } from "@/lib/hooks/use-toast";
 import { useAuth } from "../../AuthContext";
 import { readDriveFile } from "@/lib/drive-helpers";
+import Markdown from 'marked-react';
 
 interface Group {
   id: string;
@@ -55,7 +56,7 @@ export default function BotCreate() {
       try {
         const response = await fetch("/api/group");
         if (!response.ok) throw new Error("Failed to fetch groups");
-        const data = await response.json();
+        const data = await response.json();``
         setAvailableGroups(data.ownedGroups.map((g: any) => ({ 
           id: g.groupID, name: g.groupName 
         })));
@@ -299,6 +300,16 @@ export default function BotCreate() {
       parts.push(`User question: ${userText}`);
 
       // Final instruction: prefer in-document answers, else respond accordingly
+      parts.push(`
+      FORMATTING RULES:
+      - Use strict GitHub Flavored Markdown (GFM).
+      - TABLES: Always include the separator row (e.g., |---|---|). Every row must start and end with a pipe (|).
+      - LISTS: Use a single space after the bullet (e.g., "- Item" not "-Item"). 
+      - HEADERS: Always put a space after the '#' (e.g., "## Section" not "##Section").
+      - CODE: Always use triple backticks with the language name for code blocks.
+      - SPACING: Always include a blank line before and after tables, lists, and code blocks.
+      - CRITICAL: For line breaks in tables, use a semicolon or a comma instead.
+      `);
       parts.push("Please answer the user's question following the instructions above and using the provided document when relevant. If the document does not contain the answer, say you don't know.");
 
       const combinedPrompt = parts.join("\n\n");
@@ -318,6 +329,8 @@ export default function BotCreate() {
     }
   };
 
+  const [isSharing, setIsSharing] = useState(false);
+
   const handleFinishCreation = async () => {
     try {
       const res = await fetch("/api/bot/create", {
@@ -334,15 +347,62 @@ export default function BotCreate() {
           websiteLink: knowledgeSource === "url" ? knowledgeUrl.trim() : "",
         })
       });
-      if (res.ok) {
-        router.push("/account/bots");
-      }
-      else {
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
         toast({
           title: "Error",
-          description: "Failed to create bot",
+          description: data?.message || "Failed to create bot",
         });
+        return;
       }
+
+      // If groups were selected, attempt to share the newly created bot
+      const botDocId = data?.botId;
+      if (selectedGroups.length > 0 && botDocId) {
+        try {
+          setIsSharing(true);
+          // Fetch the created bot to get the numeric botID
+          const botRes = await fetch(`/api/bot/${botDocId}`);
+          if (!botRes.ok) throw new Error("Failed to fetch created bot");
+          const botData = await botRes.json();
+          const numericBotId = Number(botData.botID);
+
+          if (!isNaN(numericBotId)) {
+            const shareRes = await fetch("/api/group/update_bots", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                groupIDs: selectedGroups.map((id) => Number(id)),
+                botID: numericBotId,
+              }),
+            });
+
+            const shareJson = await shareRes.json().catch(() => ({}));
+            if (!shareRes.ok) {
+              toast({
+                title: "Shared with groups failed",
+                description: shareJson?.message || "Could not share bot with selected groups",
+                variant: "destructive",
+              });
+            } else {
+              toast({
+                title: "Shared successfully",
+                description: shareJson?.message || "Bot shared with selected groups",
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Error sharing after create:", err);
+          toast({ title: "Error", description: "Bot created but sharing failed" });
+        } finally {
+          setIsSharing(false);
+        }
+      }
+
+      // Navigate to bot list after creation (and sharing attempt)
+      router.push("/account/bots");
     } catch (error) {
       console.log(error);
       toast({
@@ -440,6 +500,7 @@ export default function BotCreate() {
                   <div className="mt-6 pt-6 border-t border-slate-200">
                     <h3 className="font-semibold text-slate-900 mb-4">Share with Groups</h3>
                     <Button onClick={() => setShowGroupModal(true)} variant="outline" className="w-full"><Share2 className="w-4 h-4 mr-2" />Select Groups ({selectedGroups.length})</Button>
+                    {selectedGroups.length > 0 && <div className="text-xs text-slate-500 mt-2">Selected groups will be applied when you save the bot.</div>}
                   </div>
                 )}
               </div>
@@ -501,7 +562,14 @@ export default function BotCreate() {
                   ) : (
                     chatMessages.map((msg, i) => (
                       <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.role === "user" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-900"}`}>{msg.content}</div>
+                        <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.role === "user" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-900"}`}>
+                          {msg.role === "user" ? msg.content :
+                          (
+                            <div className="prose prose-sm max-w-none prose-slate">
+                              <Markdown value={msg.content} gfm={true}/>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
@@ -525,7 +593,7 @@ export default function BotCreate() {
               <p><b>Model:</b> {model}</p>
               <p><b>Status:</b> Active</p>
               {knowledgeUrl && <p className="mt-3 text-xs text-slate-600">Knowledge: {knowledgeUrl}</p>}
-              <Button className="w-full mt-6 bg-blue-600 text-white" onClick={handleFinishCreation}>Save & Finish</Button>
+              <Button className="w-full mt-6 bg-blue-600 text-white" onClick={handleFinishCreation} disabled={isSharing}>{isSharing ? "Saving..." : "Save & Finish"}</Button>
               <Button className="w-full mt-3" variant="outline" onClick={() => setBotCreated(false)}>Back</Button>
             </div>
           </div>

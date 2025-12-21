@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const userIDNumber = userData.userID || userData.userId || 0;
 
     const body = await req.json();
-    const { botId, message } = body;
+    const { botId, message, knowledgeBase } = body;
 
     if (!botId || !message) {
       return NextResponse.json(
@@ -189,6 +189,22 @@ export async function POST(req: NextRequest) {
     const modelType = botConfig?.typeModel || "gemini-1.5-flash";
     const botContext = botData.context || botData.knowledge || "";
 
+    // Combine bot context with knowledge base from client
+    let combinedContext = botContext;
+    if (knowledgeBase && knowledgeBase.trim().length > 0) {
+      combinedContext = `${botContext}\n\n--- Knowledge Base ---\n${knowledgeBase.slice(0, 80000)}`;
+    }
+
+    combinedContext += `
+      FORMATTING RULES:
+      - Use strict GitHub Flavored Markdown (GFM).
+      - TABLES: Always include the separator row (e.g., |---|---|). Every row must start and end with a pipe (|).
+      - LISTS: Use a single space after the bullet (e.g., "- Item" not "-Item"). 
+      - HEADERS: Always put a space after the '#' (e.g., "## Section" not "##Section").
+      - CODE: Always use triple backticks with the language name for code blocks.
+      - SPACING: Always include a blank line before and after tables, lists, and code blocks.
+      `
+
     // Get recent chat history for context
     const chatsQuery = query(
       collection(db, "botAgent", botId, "chats"),
@@ -216,7 +232,7 @@ export async function POST(req: NextRequest) {
       botResponseText = await generateResponse({
         model: modelType,
         userMessage: message,
-        context: botContext,
+        context: combinedContext,
         chatHistory: chatHistory,
       });
     } catch (error) {
