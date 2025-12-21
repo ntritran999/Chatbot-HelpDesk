@@ -12,6 +12,7 @@ import {
   Text,
 } from '@react-email/components';
 import tailwindConfig from '@/tailwind.config';
+import { Link2 } from 'lucide-react';
 
 interface GroupInvitationEmailProps {
   UserName: string;
@@ -54,12 +55,14 @@ export const GroupInvitationEmail = ({
             You are invited to Group {GroupName}.
           </Text>
           <Section className="text-center">
+            <a href="localhost:3000/account/groups">
             <Button
               className="bg-[#5F51E8] rounded-[3px] text-white text-[16px] no-underline text-center block p-3"
               href="localhost:3000/account/groups"
             >
               View Group
             </Button>
+            </a>
           </Section>
           <Text className="text-[16px] leading-[26px]">
             Best,
@@ -75,9 +78,5 @@ export const GroupInvitationEmail = ({
     </Tailwind>
   </Html>
 );
-
-GroupInvitationEmail.PreviewProps = {
-  UserName: 'Alan',
-} as GroupInvitationEmailProps;
 
 export default GroupInvitationEmail;
