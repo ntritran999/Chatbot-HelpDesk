@@ -39,7 +39,7 @@ export const GroupInvitationEmail = ({
           <Img
             src={`https://www.eaton.com/content/dam/eaton/products/electrical-circuit-protection/fuses/paul-p-gubany-center/bus-ele-power-short-circuit-capacity2.png`}
             width="170"
-            height="50"
+            height="170"
             alt="logo"
             className="mx-auto"
           />
@@ -52,17 +52,15 @@ export const GroupInvitationEmail = ({
             Hi {UserName},
           </Text>
           <Text className="text-[16px] leading-[26px]">
-            You are invited to Group {GroupName}.
+            You are invited to Group <strong>{GroupName}</strong>.
           </Text>
           <Section className="text-center">
-            <a href="localhost:3000/account/groups">
             <Button
               className="bg-[#5F51E8] rounded-[3px] text-white text-[16px] no-underline text-center block p-3"
-              href="localhost:3000/account/groups"
+              href={`${process.env.DOMAIN}/account/groups`}
             >
               View Group
             </Button>
-            </a>
           </Section>
           <Text className="text-[16px] leading-[26px]">
             Best,
@@ -71,7 +69,7 @@ export const GroupInvitationEmail = ({
           </Text>
           <Hr className="border-[#cccccc] my-5" />
           <Text className="text-[#8898aa] text-[12px]">
-            footer
+            © 2025 ChatBot-HelpDesk. All rights reserved.
           </Text>
         </Container>
       </Body>
